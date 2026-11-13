@@ -39,6 +39,7 @@ class Frame:
         self._enable = enable
         self._cell_size = cell_size
         self._cells = {}
+        self._widget_cells = {}
         self._active_widgets = set()
         self._order = order
         self._mouse_pos = 0, 0
@@ -50,8 +51,12 @@ class Frame:
         return int(x / self._cell_size), int(y / self._cell_size)
 
     def _on_reposition_handler(self, widget):
-        self.remove_widget(widget)
-        self.add_widget(widget)
+        # Only re-hash the Widget if it is currently tracked. It may have
+        # been removed from the Frame (for example by a MovableFrame while
+        # being dragged), in which case there is nothing to update.
+        if widget in self._widget_cells:
+            self.remove_widget(widget)
+            self.add_widget(widget)
 
     @property
     def enable(self):
@@ -71,19 +76,29 @@ class Frame:
 
     def add_widget(self, widget: WidgetBase) -> None:
         """Add a Widget to the spatial hash."""
+        if widget in self._widget_cells:
+            self.remove_widget(widget)
         min_vec, max_vec = self._hash(*widget.aabb[0:2]), self._hash(*widget.aabb[2:4])
+        cells = set()
         for i in range(min_vec[0], max_vec[0] + 1):
             for j in range(min_vec[1], max_vec[1] + 1):
                 self._cells.setdefault((i, j), set()).add(widget)
+                cells.add((i, j))
+        # Remember which cells the Widget occupies, so it can be
+        # removed from exactly those cells even after it has moved.
+        self._widget_cells[widget] = cells
         widget.update_groups(self._order)
         widget.set_handler("on_reposition", self._on_reposition_handler)
 
     def remove_widget(self, widget: WidgetBase) -> None:
         """Remove a Widget from the spatial hash."""
-        min_vec, max_vec = self._hash(*widget.aabb[0:2]), self._hash(*widget.aabb[2:4])
-        for i in range(min_vec[0], max_vec[0] + 1):
-            for j in range(min_vec[1], max_vec[1] + 1):
-                self._cells.get((i, j)).remove(widget)
+        cells = self._widget_cells.pop(widget, None)
+        if cells is None:
+            return
+        for cell_key in cells:
+            cell = self._cells.get(cell_key)
+            if cell is not None:
+                cell.discard(widget)
 
     # Handlers
 
